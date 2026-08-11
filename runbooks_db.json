@@ -1,0 +1,23 @@
+[
+  {
+    "id": "err-crashloop",
+    "title": "CrashLoopBackOff",
+    "category": "Kubernetes",
+    "cause": "Missing environment variables, database connection refused, or OOMKilled.",
+    "solution": "kubectl logs -n production -l app=my-app --tail=100 --previous\nkubectl describe pod -n production -l app=my-app"
+  },
+  {
+    "id": "err-502",
+    "title": "502 Bad Gateway",
+    "category": "Ingress",
+    "cause": "Backend pod unreachable, service target port mismatch, or failed readiness probe.",
+    "solution": "kubectl get pods -n production -l app=my-app\nkubectl get endpoints my-app-service -n production"
+  },
+  {
+    "id": "err-db-conn",
+    "title": "Database Connection Exhausted",
+    "category": "Database",
+    "cause": "Application connection leak or sudden traffic spike without pooler (PgBouncer).",
+    "solution": "SELECT count(*), state FROM pg_stat_activity GROUP BY state;\nSELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle';"
+  }
+]
