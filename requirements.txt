@@ -1,2 +1,2 @@
 streamlit
-xhtml2pdf
+xhtml2pdf==0.2.17
