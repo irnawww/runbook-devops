@@ -1,25 +1,17 @@
 import json
 import os
 import html
+from io import BytesIO
+
 import streamlit as st
-from xhtml2pdf import pisa
 
-
-# =========================================================
-# PAGE CONFIG
-# =========================================================
 
 st.set_page_config(
     page_title="War Room Binder",
-    page_icon="OPS",
+    page_icon="📘",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-
-
-# =========================================================
-# CONFIG
-# =========================================================
 
 DB_FILE = "runbooks_db.json"
 
@@ -42,14 +34,14 @@ DEFAULT_DATA = [
         "verification": [
             "Check pod status and restart count.",
             "Review previous container logs.",
-            "Confirm environment variables and resource limits."
+            "Confirm environment variables and resource limits.",
         ],
     },
     {
         "id": "err-502",
         "title": "502 Bad Gateway",
         "category": "Ingress",
-        "type": "incident",
+        "type": "runbook",
         "status": "active",
         "impact": "high",
         "author": "DevOps",
@@ -62,7 +54,7 @@ DEFAULT_DATA = [
         "verification": [
             "Confirm backend pods are running.",
             "Check service endpoints.",
-            "Verify readiness probes."
+            "Verify readiness probes.",
         ],
     },
     {
@@ -83,21 +75,19 @@ DEFAULT_DATA = [
         "verification": [
             "Check active PostgreSQL connections.",
             "Review PgBouncer pool usage.",
-            "Confirm application connection count returns to normal."
+            "Confirm application connection count returns to normal.",
         ],
     },
 ]
 
 
 # =========================================================
-# CUSTOM CSS
+# CSS
 # =========================================================
 
 st.markdown(
     """
     <style>
-
-    /* ---------- GLOBAL ---------- */
 
     .stApp {
         background: #edf6fa;
@@ -118,9 +108,6 @@ st.markdown(
         visibility: hidden;
     }
 
-
-    /* ---------- TOP HEADER ---------- */
-
     .top-header {
         display: flex;
         align-items: center;
@@ -137,9 +124,9 @@ st.markdown(
     }
 
     .brand-icon {
-        width: 28px;
-        height: 28px;
-        border-radius: 7px;
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
         background: #18859a;
         color: white;
         display: flex;
@@ -159,14 +146,11 @@ st.markdown(
     }
 
     .brand-name {
-        font-size: 13px;
+        font-size: 14px;
         font-weight: 700;
         color: #0b1820;
-        margin-top: -1px;
+        margin-top: 2px;
     }
-
-
-    /* ---------- PAGE TITLE ---------- */
 
     .page-title {
         font-size: 25px;
@@ -183,15 +167,13 @@ st.markdown(
     }
 
     .doc-count {
-        float: right;
+        text-align: right;
         font-family: monospace;
         color: #607d89;
         font-size: 10px;
-        margin-top: -30px;
+        margin-top: -35px;
+        margin-bottom: 18px;
     }
-
-
-    /* ---------- SEARCH PANEL ---------- */
 
     .search-panel {
         background: rgba(255,255,255,0.42);
@@ -201,28 +183,13 @@ st.markdown(
         margin-bottom: 15px;
     }
 
-
-    /* ---------- FILTER PILLS ---------- */
-
-    .filter-label {
-        font-family: monospace;
-        font-size: 9px;
-        color: #718a94;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        margin-bottom: 5px;
-    }
-
-
-    /* ---------- CARDS ---------- */
-
     .runbook-card {
         background: rgba(255,255,255,0.55);
         border: 1px solid #cbdfe7;
         border-radius: 15px;
         padding: 14px 15px;
         min-height: 170px;
-        margin-bottom: 10px;
+        margin-bottom: 4px;
         transition: 0.15s ease;
     }
 
@@ -288,7 +255,7 @@ st.markdown(
     }
 
     .card-title {
-        font-size: 12px;
+        font-size: 13px;
         font-weight: 700;
         color: #142832;
         margin-bottom: 5px;
@@ -325,16 +292,11 @@ st.markdown(
         font-size: 8px;
     }
 
-
-    /* ---------- READING PANE ---------- */
-
     .reading-pane {
         background: rgba(255,255,255,0.52);
         border: 1px solid #cbdfe7;
         border-radius: 15px;
         overflow: hidden;
-        position: sticky;
-        top: 15px;
     }
 
     .reading-header {
@@ -396,9 +358,6 @@ st.markdown(
         margin-right: 7px;
     }
 
-
-    /* ---------- COMMAND BLOCK ---------- */
-
     .command-box {
         background: #0a202b;
         border-radius: 11px;
@@ -411,9 +370,6 @@ st.markdown(
         overflow-x: auto;
         margin-top: 10px;
     }
-
-
-    /* ---------- RUNBOOK MODE ---------- */
 
     .mode-card {
         background: rgba(255,255,255,0.5);
@@ -502,9 +458,6 @@ st.markdown(
         text-transform: uppercase;
     }
 
-
-    /* ---------- SIDEBAR ---------- */
-
     [data-testid="stSidebar"] {
         background: #f4fafc;
     }
@@ -512,9 +465,6 @@ st.markdown(
     [data-testid="stSidebar"] .block-container {
         padding-top: 2rem;
     }
-
-
-    /* ---------- STREAMLIT BUTTONS ---------- */
 
     .stButton > button {
         border-radius: 9px;
@@ -532,30 +482,6 @@ st.markdown(
     div[data-testid="stDownloadButton"] button {
         border-radius: 9px;
     }
-
-
-    /* ---------- METRICS ---------- */
-
-    div[data-testid="stMetric"] {
-        background: rgba(255,255,255,0.45);
-        border: 1px solid #cbdfe7;
-        border-radius: 12px;
-        padding: 10px;
-    }
-
-    div[data-testid="stMetricLabel"] {
-        font-family: monospace;
-        font-size: 8px;
-        color: #708792;
-    }
-
-    div[data-testid="stMetricValue"] {
-        font-size: 20px;
-        color: #112832;
-    }
-
-
-    /* ---------- MOBILE ---------- */
 
     @media (max-width: 900px) {
         .large-body {
@@ -579,47 +505,68 @@ st.markdown(
 # =========================================================
 
 def normalize_runbook(r):
-    """Ensure older JSON entries still work with the new UI."""
-
     r.setdefault("type", "runbook")
     r.setdefault("status", "active")
     r.setdefault("impact", "medium")
     r.setdefault("author", "DevOps")
     r.setdefault("tags", [])
+    r.setdefault("cause", "")
+    r.setdefault("solution", "")
 
     if not isinstance(r["tags"], list):
         r["tags"] = [str(r["tags"])]
 
-    r.setdefault("verification", [
-        "Review the service status.",
-        "Confirm the remediation was successful.",
-    ])
+    r.setdefault(
+        "verification",
+        [
+            "Review the service status.",
+            "Confirm the remediation was successful.",
+        ],
+    )
 
     return r
 
 
+def save_data(data):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(
+            data,
+            f,
+            indent=2,
+            ensure_ascii=False,
+        )
+
+
 def load_data():
     if not os.path.exists(DB_FILE):
-        data = [normalize_runbook(x) for x in DEFAULT_DATA]
-
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-
+        data = [
+            normalize_runbook(x)
+            for x in DEFAULT_DATA
+        ]
+        save_data(data)
         return data
 
     try:
         with open(DB_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        return [normalize_runbook(x) for x in data]
+        if not isinstance(data, list):
+            raise ValueError("Invalid database format")
 
-    except (json.JSONDecodeError, OSError):
-        return [normalize_runbook(x) for x in DEFAULT_DATA]
+        return [
+            normalize_runbook(x)
+            for x in data
+        ]
 
-
-def save_data(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    except (
+        json.JSONDecodeError,
+        OSError,
+        ValueError,
+    ):
+        return [
+            normalize_runbook(x)
+            for x in DEFAULT_DATA
+        ]
 
 
 runbooks = load_data()
@@ -629,19 +576,29 @@ runbooks = load_data()
 # SESSION STATE
 # =========================================================
 
-if "selected_runbook" not in st.session_state:
-    st.session_state.selected_runbook = 0
+if "selected_id" not in st.session_state:
+    st.session_state.selected_id = (
+        runbooks[0]["id"]
+        if runbooks
+        else None
+    )
 
 if "mode" not in st.session_state:
     st.session_state.mode = "Knowledge Base"
 
+if "kb_filter" not in st.session_state:
+    st.session_state.kb_filter = "All"
+
+if "impact_filter" not in st.session_state:
+    st.session_state.impact_filter = "standard"
+
 
 # =========================================================
-# HELPER FUNCTIONS
+# HELPERS
 # =========================================================
 
 def get_type_class(runbook_type):
-    value = runbook_type.lower()
+    value = str(runbook_type).lower()
 
     if "incident" in value:
         return "incident-badge"
@@ -659,7 +616,9 @@ def get_type_class(runbook_type):
 
 
 def get_type_label(runbook):
-    value = runbook.get("type", "runbook").lower()
+    value = str(
+        runbook.get("type", "runbook")
+    ).lower()
 
     mapping = {
         "runbook": "RUNBOOK",
@@ -670,16 +629,27 @@ def get_type_label(runbook):
         "onboarding": "ONBOARDING",
     }
 
-    return mapping.get(value, value.upper())
+    return mapping.get(
+        value,
+        value.upper(),
+    )
 
 
 def status_html(runbook):
-    status = runbook.get("status", "active")
+    status = str(
+        runbook.get("status", "active")
+    ).lower()
 
     if status == "resolved":
-        return '<span class="status-dot resolved-dot">●</span> resolved'
+        return (
+            '<span class="status-dot resolved-dot">'
+            "●"
+            "</span> resolved"
+        )
 
-    return '<span class="status-dot">●</span> active'
+    return (
+        '<span class="status-dot">●</span> active'
+    )
 
 
 def tags_html(runbook):
@@ -689,14 +659,19 @@ def tags_html(runbook):
         return ""
 
     return "".join(
-        f'<span class="tag">{html.escape(str(tag))}</span>'
+        f'<span class="tag">'
+        f'{html.escape(str(tag))}'
+        f"</span>"
         for tag in tags[:4]
     )
 
 
 def card_html(runbook):
     type_label = get_type_label(runbook)
-    type_class = get_type_class(runbook.get("type", "runbook"))
+
+    type_class = get_type_class(
+        runbook.get("type", "runbook")
+    )
 
     return f"""
     <div class="runbook-card">
@@ -712,11 +687,15 @@ def card_html(runbook):
         </div>
 
         <div class="card-title">
-            {html.escape(runbook.get("title", ""))}
+            {html.escape(
+                str(runbook.get("title", ""))
+            )}
         </div>
 
         <div class="card-description">
-            {html.escape(runbook.get("cause", ""))}
+            {html.escape(
+                str(runbook.get("cause", ""))
+            )}
         </div>
 
         <div style="margin-top: 8px;">
@@ -727,11 +706,25 @@ def card_html(runbook):
 
         <div class="card-footer">
             <span>
-                {html.escape(str(runbook.get("author", "DevOps")))}
+                {html.escape(
+                    str(
+                        runbook.get(
+                            "author",
+                            "DevOps"
+                        )
+                    )
+                )}
             </span>
 
             <span>
-                {html.escape(runbook.get("id", ""))}
+                {html.escape(
+                    str(
+                        runbook.get(
+                            "id",
+                            ""
+                        )
+                    )
+                )}
             </span>
         </div>
 
@@ -739,12 +732,24 @@ def card_html(runbook):
     """
 
 
-def generate_pdf(runbooks, app_name="DevOps Operations Manual"):
+# =========================================================
+# PDF
+# =========================================================
+
+def generate_pdf(runbooks):
+    from xhtml2pdf import pisa
+
     cards_html = ""
 
     for r in runbooks:
-        solution = html.escape(str(r.get("solution", "")))
-        cause = html.escape(str(r.get("cause", "")))
+
+        cause = html.escape(
+            str(r.get("cause", ""))
+        )
+
+        solution = html.escape(
+            str(r.get("solution", ""))
+        )
 
         cards_html += f"""
         <div style="
@@ -760,14 +765,21 @@ def generate_pdf(runbooks, app_name="DevOps Operations Manual"):
                 color:#0f172a;
                 margin-bottom:5px;
             ">
-                [{html.escape(get_type_label(r))}]
-                {html.escape(r.get("id", ""))}
+                [{html.escape(
+                    get_type_label(r)
+                )}]
+                {html.escape(
+                    str(r.get("id", ""))
+                )}
                 -
-                {html.escape(r.get("title", ""))}
+                {html.escape(
+                    str(r.get("title", ""))
+                )}
             </div>
 
             <div style="margin-bottom:7px;">
-                <strong>Root Cause:</strong> {cause}
+                <strong>Root Cause:</strong>
+                {cause}
             </div>
 
             <div style="
@@ -786,10 +798,12 @@ def generate_pdf(runbooks, app_name="DevOps Operations Manual"):
     html_content = f"""
     <!DOCTYPE html>
     <html>
+
     <head>
         <meta charset="UTF-8">
 
         <style>
+
             @page {{
                 size: A4;
                 margin: 12mm;
@@ -813,15 +827,19 @@ def generate_pdf(runbooks, app_name="DevOps Operations Manual"):
                 font-size: 8pt;
                 margin-bottom: 16px;
             }}
+
         </style>
     </head>
 
     <body>
 
-        <h1>{html.escape(app_name)}</h1>
+        <h1>
+            DevOps Operations Manual
+        </h1>
 
         <div class="meta">
-            Internal Infrastructure & Incident Resolution Guides
+            Internal Infrastructure &
+            Incident Resolution Guides
         </div>
 
         {cards_html}
@@ -830,15 +848,19 @@ def generate_pdf(runbooks, app_name="DevOps Operations Manual"):
     </html>
     """
 
-    pdf_filename = "devops_runbook_export.pdf"
+    output = BytesIO()
 
-    with open(pdf_filename, "wb") as pdf_file:
-        pisa.CreatePDF(
-            html_content,
-            dest=pdf_file
+    result = pisa.CreatePDF(
+        html_content,
+        dest=output,
+    )
+
+    if result.err:
+        raise RuntimeError(
+            "PDF generation gagal."
         )
 
-    return pdf_filename
+    return output.getvalue()
 
 
 # =========================================================
@@ -856,6 +878,7 @@ st.markdown(
             </div>
 
             <div>
+
                 <div class="brand-small">
                     Documentation Archive
                 </div>
@@ -863,6 +886,7 @@ st.markdown(
                 <div class="brand-name">
                     War Room Binder
                 </div>
+
             </div>
 
         </div>
@@ -877,26 +901,38 @@ st.markdown(
 # MODE SWITCH
 # =========================================================
 
-mode_col1, mode_col2, mode_spacer = st.columns([1, 1, 4])
+mode_col1, mode_col2, mode_spacer = st.columns(
+    [1, 1, 4]
+)
 
 with mode_col1:
+
     if st.button(
         "Knowledge Base",
         use_container_width=True,
     ):
-        st.session_state.mode = "Knowledge Base"
+        st.session_state.mode = (
+            "Knowledge Base"
+        )
         st.rerun()
 
+
 with mode_col2:
+
     if st.button(
         "Runbook Mode",
         use_container_width=True,
     ):
-        st.session_state.mode = "Runbook Mode"
+        st.session_state.mode = (
+            "Runbook Mode"
+        )
         st.rerun()
 
 
-st.markdown("<br>", unsafe_allow_html=True)
+st.markdown(
+    "<br>",
+    unsafe_allow_html=True,
+)
 
 
 # =========================================================
@@ -970,20 +1006,26 @@ with st.sidebar:
 
         new_tags = st.text_input(
             "Tags",
-            placeholder="kubernetes, pod, production",
+            placeholder=(
+                "kubernetes, pod, production"
+            ),
         )
 
         new_cause = st.text_area(
-            "Description / Root Cause",
+            "Description / Root Cause"
         )
 
         new_solution = st.text_area(
-            "Commands / Solution",
+            "Commands / Solution"
         )
 
         new_verification = st.text_area(
             "Verification Steps",
-            placeholder="Check pod status\nReview logs\nVerify service health",
+            placeholder=(
+                "Check pod status\n"
+                "Review logs\n"
+                "Verify service health"
+            ),
         )
 
         submit_btn = st.form_submit_button(
@@ -993,10 +1035,24 @@ with st.sidebar:
 
         if submit_btn:
 
-            if not new_id or not new_title or not new_category:
+            if (
+                not new_id.strip()
+                or not new_title.strip()
+                or not new_category.strip()
+            ):
 
                 st.error(
                     "ID, Title, dan Category wajib diisi."
+                )
+
+            elif any(
+                item.get("id")
+                == new_id.strip()
+                for item in runbooks
+            ):
+
+                st.error(
+                    "ID tersebut sudah digunakan."
                 )
 
             else:
@@ -1020,7 +1076,10 @@ with st.sidebar:
                     "type": new_type,
                     "status": new_status,
                     "impact": new_impact,
-                    "author": new_author.strip() or "DevOps",
+                    "author": (
+                        new_author.strip()
+                        or "DevOps"
+                    ),
                     "tags": tags,
                     "cause": new_cause.strip(),
                     "solution": new_solution.strip(),
@@ -1031,7 +1090,13 @@ with st.sidebar:
 
                 save_data(runbooks)
 
-                st.success("Runbook saved.")
+                st.session_state.selected_id = (
+                    new_entry["id"]
+                )
+
+                st.success(
+                    "Runbook saved."
+                )
 
                 st.rerun()
 
@@ -1044,16 +1109,31 @@ with st.sidebar:
         use_container_width=True,
     ):
 
-        pdf_file = generate_pdf(runbooks)
+        try:
 
-        with open(pdf_file, "rb") as f:
+            pdf_bytes = generate_pdf(
+                runbooks
+            )
 
             st.download_button(
                 "Download PDF",
-                f,
+                data=pdf_bytes,
                 file_name="devops_runbooks.pdf",
                 mime="application/pdf",
                 use_container_width=True,
+            )
+
+        except ImportError:
+
+            st.error(
+                "xhtml2pdf belum terinstall. "
+                "Jalankan: pip install xhtml2pdf"
+            )
+
+        except Exception as exc:
+
+            st.error(
+                f"PDF generation gagal: {exc}"
             )
 
 
@@ -1064,26 +1144,27 @@ with st.sidebar:
 if st.session_state.mode == "Knowledge Base":
 
     st.markdown(
-        '<div class="page-title">Knowledge Base</div>',
+        '<div class="page-title">'
+        "Knowledge Base"
+        "</div>",
         unsafe_allow_html=True,
     )
 
     st.markdown(
         '<div class="page-subtitle">'
-        'Semua runbook, incident, infra, CI/CD, dan onboarding dalam satu binder.'
-        '</div>',
+        "Semua runbook, incident, infra, CI/CD, "
+        "dan onboarding dalam satu binder."
+        "</div>",
         unsafe_allow_html=True,
     )
 
     st.markdown(
         f'<div class="doc-count">'
-        f'{len(runbooks)} of {len(runbooks)} docs'
-        f'</div>',
+        f"{len(runbooks)} docs"
+        "</div>",
         unsafe_allow_html=True,
     )
 
-
-    # Search
     st.markdown(
         '<div class="search-panel">',
         unsafe_allow_html=True,
@@ -1091,18 +1172,20 @@ if st.session_state.mode == "Knowledge Base":
 
     search_query = st.text_input(
         "Search",
-        placeholder="⌕  Search runbooks, incidents, infra guides...",
+        placeholder=(
+            "⌕  Search runbooks, incidents, "
+            "infra guides..."
+        ),
         label_visibility="collapsed",
     )
 
     st.markdown(
-        '</div>',
+        "</div>",
         unsafe_allow_html=True,
     )
 
-
-    # Filters
-    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5, filter_col6 = st.columns(
+    filter_col1, filter_col2, filter_col3, \
+    filter_col4, filter_col5, filter_col6 = st.columns(
         [1, 1, 1, 1, 1, 1]
     )
 
@@ -1115,26 +1198,33 @@ if st.session_state.mode == "Knowledge Base":
         ("onboarding", filter_col6),
     ]
 
-    if "kb_filter" not in st.session_state:
-        st.session_state.kb_filter = "All"
-
     for filter_name, column in filters:
 
         with column:
 
+            label = (
+                filter_name.upper()
+                if filter_name != "All"
+                else "ALL"
+            )
+
             if st.button(
-                filter_name.upper() if filter_name != "All" else "ALL",
+                label,
                 use_container_width=True,
                 key=f"filter_{filter_name}",
             ):
 
-                st.session_state.kb_filter = filter_name
+                st.session_state.kb_filter = (
+                    filter_name
+                )
+
                 st.rerun()
 
-
-    # Filtering
     query = search_query.lower().strip()
-    active_filter = st.session_state.kb_filter.lower()
+
+    active_filter = (
+        st.session_state.kb_filter.lower()
+    )
 
     filtered_runbooks = []
 
@@ -1142,10 +1232,18 @@ if st.session_state.mode == "Knowledge Base":
 
         matches_search = (
             not query
-            or query in r.get("id", "").lower()
-            or query in r.get("title", "").lower()
-            or query in r.get("cause", "").lower()
-            or query in r.get("category", "").lower()
+            or query in str(
+                r.get("id", "")
+            ).lower()
+            or query in str(
+                r.get("title", "")
+            ).lower()
+            or query in str(
+                r.get("cause", "")
+            ).lower()
+            or query in str(
+                r.get("category", "")
+            ).lower()
             or any(
                 query in str(tag).lower()
                 for tag in r.get("tags", [])
@@ -1154,47 +1252,56 @@ if st.session_state.mode == "Knowledge Base":
 
         matches_filter = (
             active_filter == "all"
-            or r.get("type", "runbook").lower() == active_filter
+            or str(
+                r.get("type", "runbook")
+            ).lower()
+            == active_filter
         )
 
         if matches_search and matches_filter:
             filtered_runbooks.append(r)
 
+    selected = None
 
-    # Selected runbook
     if filtered_runbooks:
 
-        if st.session_state.selected_runbook >= len(filtered_runbooks):
-            st.session_state.selected_runbook = 0
+        selected = next(
+            (
+                r
+                for r in filtered_runbooks
+                if r.get("id")
+                == st.session_state.selected_id
+            ),
+            None,
+        )
 
-        selected = filtered_runbooks[
-            st.session_state.selected_runbook
-        ]
+        if selected is None:
 
-    else:
+            selected = filtered_runbooks[0]
 
-        selected = None
+            st.session_state.selected_id = (
+                selected.get("id")
+            )
 
-
-    # Main content
     left_col, right_col = st.columns(
         [2.2, 1],
         gap="medium",
     )
 
-
-    # Cards
     with left_col:
 
         if not filtered_runbooks:
 
             st.info(
-                "No documentation matches the current filter."
+                "No documentation matches "
+                "the current filter."
             )
 
         else:
 
-            for idx, runbook in enumerate(filtered_runbooks):
+            for idx, runbook in enumerate(
+                filtered_runbooks
+            ):
 
                 st.markdown(
                     card_html(runbook),
@@ -1203,40 +1310,90 @@ if st.session_state.mode == "Knowledge Base":
 
                 if st.button(
                     "Open document",
-                    key=f"open_kb_{runbook['id']}_{idx}",
+                    key=(
+                        f"open_kb_"
+                        f"{runbook.get('id')}_"
+                        f"{idx}"
+                    ),
                     use_container_width=True,
                 ):
 
-                    st.session_state.selected_runbook = idx
+                    st.session_state.selected_id = (
+                        runbook.get("id")
+                    )
 
                     st.rerun()
 
-
-    # Reading pane
     with right_col:
 
         if selected:
+
+            verification_html = "".join(
+                f"""
+                <div class="verification-item">
+                    {html.escape(str(step))}
+                </div>
+                """
+                for step in selected.get(
+                    "verification",
+                    [],
+                )
+            )
 
             st.markdown(
                 f"""
                 <div class="reading-pane">
 
                     <div class="reading-header">
-                        <span>Reading Pane</span>
-                        <span>{html.escape(get_type_label(selected))}</span>
+
+                        <span>
+                            Reading Pane
+                        </span>
+
+                        <span>
+                            {html.escape(
+                                get_type_label(selected)
+                            )}
+                        </span>
+
                     </div>
 
                     <div class="reading-content">
 
                         <div class="reading-title">
-                            {html.escape(selected.get("title", ""))}
+                            {html.escape(
+                                str(
+                                    selected.get(
+                                        "title",
+                                        ""
+                                    )
+                                )
+                            )}
                         </div>
 
                         <div class="reading-description">
+
                             <strong>ID:</strong>
-                            {html.escape(selected.get("id", ""))}
+                            {html.escape(
+                                str(
+                                    selected.get(
+                                        "id",
+                                        ""
+                                    )
+                                )
+                            )}
+
                             <br><br>
-                            {html.escape(selected.get("cause", ""))}
+
+                            {html.escape(
+                                str(
+                                    selected.get(
+                                        "cause",
+                                        ""
+                                    )
+                                )
+                            )}
+
                         </div>
 
                         <div>
@@ -1249,12 +1406,7 @@ if st.session_state.mode == "Knowledge Base":
                                 VERIFICATION STEPS
                             </div>
 
-                            {
-                                "".join(
-                                    f'<div class="verification-item">{html.escape(str(step))}</div>'
-                                    for step in selected.get("verification", [])
-                                )
-                            }
+                            {verification_html}
 
                         </div>
 
@@ -1265,24 +1417,22 @@ if st.session_state.mode == "Knowledge Base":
                 unsafe_allow_html=True,
             )
 
-            st.markdown("")
-
             if st.button(
                 "Open Full Document",
-                key=f"full_{selected['id']}",
+                key=(
+                    f"full_"
+                    f"{selected.get('id')}"
+                ),
                 use_container_width=True,
             ):
 
-                st.session_state.mode = "Runbook Mode"
+                st.session_state.mode = (
+                    "Runbook Mode"
+                )
 
-                # Keep current selected item
-                selected_id = selected["id"]
-
-                for idx, item in enumerate(runbooks):
-
-                    if item["id"] == selected_id:
-                        st.session_state.selected_runbook = idx
-                        break
+                st.session_state.selected_id = (
+                    selected.get("id")
+                )
 
                 st.rerun()
 
@@ -1294,19 +1444,20 @@ if st.session_state.mode == "Knowledge Base":
 else:
 
     st.markdown(
-        '<div class="page-title">Active Runbooks</div>',
+        '<div class="page-title">'
+        "Active Runbooks"
+        "</div>",
         unsafe_allow_html=True,
     )
 
     st.markdown(
         '<div class="page-subtitle">'
-        'Verified procedures with direct command execution blocks.'
-        '</div>',
+        "Verified procedures with direct command "
+        "execution blocks."
+        "</div>",
         unsafe_allow_html=True,
     )
 
-
-    # Search
     st.markdown(
         '<div class="mode-card">',
         unsafe_allow_html=True,
@@ -1314,23 +1465,21 @@ else:
 
     command_query = st.text_input(
         "Command Search",
-        placeholder="⌕  Filter commands by service, action, or environment...",
+        placeholder=(
+            "⌕  Filter commands by service, "
+            "action, or environment..."
+        ),
         label_visibility="collapsed",
     )
 
     st.markdown(
-        '</div>',
+        "</div>",
         unsafe_allow_html=True,
     )
 
-
-    # Standard / Critical
     mode_col1, mode_col2, mode_col3 = st.columns(
         [1, 1, 4]
     )
-
-    if "impact_filter" not in st.session_state:
-        st.session_state.impact_filter = "standard"
 
     with mode_col1:
 
@@ -1339,7 +1488,10 @@ else:
             use_container_width=True,
         ):
 
-            st.session_state.impact_filter = "standard"
+            st.session_state.impact_filter = (
+                "standard"
+            )
+
             st.rerun()
 
     with mode_col2:
@@ -1349,28 +1501,43 @@ else:
             use_container_width=True,
         ):
 
-            st.session_state.impact_filter = "critical"
+            st.session_state.impact_filter = (
+                "critical"
+            )
+
             st.rerun()
 
-
-    # Filter
     query = command_query.lower().strip()
 
     runbook_results = []
 
     for r in runbooks:
 
-        if r.get("type", "runbook").lower() != "runbook":
+        if (
+            str(
+                r.get(
+                    "type",
+                    "runbook"
+                )
+            ).lower()
+            != "runbook"
+        ):
             continue
 
         search_text = " ".join(
             [
-                r.get("id", ""),
-                r.get("title", ""),
-                r.get("cause", ""),
-                r.get("solution", ""),
-                r.get("category", ""),
-                " ".join(r.get("tags", [])),
+                str(r.get("id", "")),
+                str(r.get("title", "")),
+                str(r.get("cause", "")),
+                str(r.get("solution", "")),
+                str(r.get("category", "")),
+                " ".join(
+                    str(x)
+                    for x in r.get(
+                        "tags",
+                        []
+                    )
+                ),
             ]
         ).lower()
 
@@ -1380,126 +1547,187 @@ else:
         )
 
         matches_impact = (
-            st.session_state.impact_filter == "standard"
-            or r.get("impact", "medium").lower() == "high"
+            st.session_state.impact_filter
+            == "standard"
+            or str(
+                r.get(
+                    "impact",
+                    "medium"
+                )
+            ).lower()
+            == "high"
         )
 
         if matches_query and matches_impact:
             runbook_results.append(r)
 
+    if not runbook_results:
 
-    # Runbook cards
-    for idx, r in enumerate(runbook_results, start=1):
-
-        impact = r.get("impact", "medium")
-
-        circle_class = (
-            "number-circle-high"
-            if impact == "high"
-            else ""
+        st.info(
+            "No active runbooks match "
+            "the current filter."
         )
 
-        impact_class = (
+    else:
+
+        for idx, r in enumerate(
+            runbook_results,
+            start=1,
+        ):
+
+            impact = str(
+                r.get(
+                    "impact",
+                    "medium"
+                )
+            ).lower()
+
+            circle_class = (
+                "number-circle-high"
+                if impact == "high"
+                else ""
+            )
+
+            impact_class = (
+                ""
+                if impact == "high"
+                else "impact-low"
+            )
+
+            verification_html = "".join(
+                f"""
+                <div class="verification-item">
+                    {html.escape(str(step))}
+                </div>
+                """
+                for step in r.get(
+                    "verification",
+                    []
+                )
+            )
+
+            st.markdown(
+                f"""
+                <div class="runbook-large">
+
+                    <div class="large-header">
+
+                        <div>
+
+                            <span class="number-circle {circle_class}">
+                                {idx:02d}
+                            </span>
+
+                            <span class="large-title">
+                                {html.escape(
+                                    str(
+                                        r.get(
+                                            "title",
+                                            ""
+                                        )
+                                    )
+                                )}
+                            </span>
+
+                        </div>
+
+                        <div>
+
+                            <span class="impact {impact_class}">
+                                impact:
+                                {html.escape(impact)}
+                            </span>
+
+                        </div>
+
+                    </div>
+
+                    <div class="large-body">
+
+                        <div class="large-main">
+
+                            <div class="large-description">
+                                {html.escape(
+                                    str(
+                                        r.get(
+                                            "cause",
+                                            ""
+                                        )
+                                    )
+                                )}
+                            </div>
+
+                            <div class="mono-label">
+                                Remediation Commands
+                            </div>
+
+                            <div class="command-box">
+{html.escape(
+    str(
+        r.get(
+            "solution",
             ""
-            if impact == "high"
-            else "impact-low"
         )
+    )
+)}
+                            </div>
 
-        verification_html = "".join(
-            f"""
-            <div class="verification-item">
-                {html.escape(str(step))}
-            </div>
-            """
-            for step in r.get("verification", [])
-        )
-
-
-        st.markdown(
-            f"""
-            <div class="runbook-large">
-
-                <div class="large-header">
-
-                    <div>
-                        <span class="number-circle {circle_class}">
-                            {idx:02d}
-                        </span>
-
-                        <span class="large-title">
-                            {html.escape(r.get("title", ""))}
-                        </span>
-                    </div>
-
-                    <div>
-                        <span class="impact {impact_class}">
-                            impact: {html.escape(impact)}
-                        </span>
-                    </div>
-
-                </div>
-
-
-                <div class="large-body">
-
-                    <div class="large-main">
-
-                        <div class="large-description">
-                            {html.escape(r.get("cause", ""))}
                         </div>
 
-                        <div class="mono-label">
-                            Remediation Commands
-                        </div>
+                        <div class="large-verification">
 
-                        <div class="command-box">
-{html.escape(r.get("solution", ""))}
-                        </div>
+                            <div class="mono-label">
+                                Verification Steps
+                            </div>
 
-                    </div>
+                            <div style="margin-top: 8px;">
+                                {verification_html}
+                            </div>
 
-
-                    <div class="large-verification">
-
-                        <div class="mono-label">
-                            Verification Steps
-                        </div>
-
-                        <div style="margin-top: 8px;">
-                            {verification_html}
                         </div>
 
                     </div>
 
                 </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            action_col1, action_col2, action_col3 = (
+                st.columns([4, 1, 1])
+            )
 
+            with action_col3:
 
-        # Delete action
-        action_col1, action_col2, action_col3 = st.columns(
-            [4, 1, 1]
-        )
+                if st.button(
+                    "Delete",
+                    key=(
+                        f"delete_"
+                        f"{r.get('id')}_"
+                        f"{idx}"
+                    ),
+                ):
 
-        with action_col3:
+                    runbooks = [
+                        item
+                        for item in runbooks
+                        if item.get("id")
+                        != r.get("id")
+                    ]
 
-            if st.button(
-                "Delete",
-                key=f"delete_runbook_{r['id']}_{idx}",
-            ):
+                    save_data(runbooks)
 
-                runbooks = [
-                    item
-                    for item in runbooks
-                    if item["id"] != r["id"]
-                ]
+                    if (
+                        st.session_state.selected_id
+                        == r.get("id")
+                    ):
+                        st.session_state.selected_id = (
+                            runbooks[0]["id"]
+                            if runbooks
+                            else None
+                        )
 
-                save_data(runbooks)
-
-                st.rerun()
+                    st.rerun()
 
 
 # =========================================================
