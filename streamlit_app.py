@@ -1,84 +1,30 @@
-import json
-import os
-import html
-from io import BytesIO
-
 import streamlit as st
+import json
+import html
+import io
+from pathlib import Path
 
+# =========================================================
+# OPTIONAL PDF DEPENDENCY
+# =========================================================
+
+try:
+    from xhtml2pdf import pisa
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+
+
+# =========================================================
+# PAGE CONFIG
+# =========================================================
 
 st.set_page_config(
     page_title="War Room Binder",
-    page_icon="📘",
+    page_icon="🛠️",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
-
-DB_FILE = "runbooks_db.json"
-
-
-DEFAULT_DATA = [
-    {
-        "id": "err-crashloop",
-        "title": "CrashLoopBackOff",
-        "category": "Kubernetes",
-        "type": "runbook",
-        "status": "active",
-        "impact": "high",
-        "author": "DevOps",
-        "tags": ["kubernetes", "pod"],
-        "cause": "Missing environment variables, database connection refused, or OOMKilled.",
-        "solution": (
-            "kubectl logs -n production -l app=my-app --tail=100 --previous\n"
-            "kubectl describe pod -n production -l app=my-app"
-        ),
-        "verification": [
-            "Check pod status and restart count.",
-            "Review previous container logs.",
-            "Confirm environment variables and resource limits.",
-        ],
-    },
-    {
-        "id": "err-502",
-        "title": "502 Bad Gateway",
-        "category": "Ingress",
-        "type": "runbook",
-        "status": "active",
-        "impact": "high",
-        "author": "DevOps",
-        "tags": ["ingress", "gateway"],
-        "cause": "Backend pod unreachable, service target port mismatch, or failed readiness probe.",
-        "solution": (
-            "kubectl get pods -n production -l app=my-app\n"
-            "kubectl get endpoints my-app-service -n production"
-        ),
-        "verification": [
-            "Confirm backend pods are running.",
-            "Check service endpoints.",
-            "Verify readiness probes.",
-        ],
-    },
-    {
-        "id": "err-db-conn",
-        "title": "Database Connection Exhausted",
-        "category": "Database",
-        "type": "runbook",
-        "status": "active",
-        "impact": "high",
-        "author": "DevOps",
-        "tags": ["database", "postgresql"],
-        "cause": "Application connection leak or sudden traffic spike without pooler (PgBouncer).",
-        "solution": (
-            "SELECT count(*), state FROM pg_stat_activity GROUP BY state;\n"
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE state = 'idle';"
-        ),
-        "verification": [
-            "Check active PostgreSQL connections.",
-            "Review PgBouncer pool usage.",
-            "Confirm application connection count returns to normal.",
-        ],
-    },
-]
 
 
 # =========================================================
@@ -88,412 +34,164 @@ DEFAULT_DATA = [
 st.markdown(
     """
     <style>
-
     .stApp {
-        background: #edf6fa;
-        color: #10212b;
+        background: #f7f8fa;
     }
 
-    .main .block-container {
-        max-width: 1500px;
-        padding-top: 1.2rem;
-        padding-bottom: 3rem;
+    [data-testid="stAppViewContainer"] .main .block-container {
+        max-width: 1450px;
+        padding-top: 2rem;
+        padding-bottom: 4rem;
     }
 
-    header[data-testid="stHeader"] {
-        background: transparent;
+    [data-testid="stSidebar"] {
+        background: #ffffff;
+        border-right: 1px solid #e5e7eb;
     }
 
-    footer {
-        visibility: hidden;
+    h1, h2, h3 {
+        letter-spacing: -0.02em;
     }
 
-    .top-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 4px 0 14px 0;
-        border-bottom: 1px solid #cbdde5;
-        margin-bottom: 26px;
-    }
-
-    .brand-wrapper {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-
-    .brand-icon {
-        width: 34px;
-        height: 34px;
-        border-radius: 8px;
-        background: #18859a;
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: monospace;
-        font-size: 10px;
-        font-weight: 700;
-    }
-
-    .brand-small {
-        font-family: monospace;
-        font-size: 9px;
-        letter-spacing: 2px;
-        color: #237187;
-        text-transform: uppercase;
-    }
-
-    .brand-name {
-        font-size: 14px;
-        font-weight: 700;
-        color: #0b1820;
-        margin-top: 2px;
-    }
-
-    .page-title {
-        font-size: 25px;
+    .hero-title {
+        font-size: 2rem;
         font-weight: 750;
-        letter-spacing: -0.7px;
-        color: #07151e;
-        margin-bottom: 3px;
+        color: #111827;
+        margin-bottom: 0.15rem;
     }
 
-    .page-subtitle {
-        color: #58717d;
-        font-size: 12px;
-        margin-bottom: 17px;
+    .hero-subtitle {
+        color: #6b7280;
+        font-size: 0.95rem;
+        margin-bottom: 1.5rem;
     }
 
-    .doc-count {
-        text-align: right;
-        font-family: monospace;
-        color: #607d89;
-        font-size: 10px;
-        margin-top: -35px;
-        margin-bottom: 18px;
-    }
-
-    .search-panel {
-        background: rgba(255,255,255,0.42);
-        border: 1px solid #cbdfe7;
-        border-radius: 16px;
-        padding: 11px;
-        margin-bottom: 15px;
-    }
-
-    .runbook-card {
-        background: rgba(255,255,255,0.55);
-        border: 1px solid #cbdfe7;
-        border-radius: 15px;
-        padding: 14px 15px;
-        min-height: 170px;
-        margin-bottom: 4px;
-        transition: 0.15s ease;
-    }
-
-    .runbook-card:hover {
-        border-color: #72bfce;
-        background: rgba(255,255,255,0.75);
-    }
-
-    .card-top {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 8px;
-    }
-
-    .type-badge {
+    .badge {
         display: inline-block;
-        padding: 3px 8px;
-        border-radius: 8px;
-        background: #d9eef3;
-        color: #18768a;
-        font-family: monospace;
-        font-size: 8px;
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-        border: 1px solid #c2e2e9;
-    }
-
-    .incident-badge {
-        background: #fae8dc;
-        color: #c55416;
-        border-color: #f1d2c1;
-    }
-
-    .infra-badge {
-        background: #dceff3;
-        color: #17778b;
-    }
-
-    .cicd-badge {
-        background: #e7e6f2;
-        color: #625f91;
-    }
-
-    .onboarding-badge {
-        background: #e8eedf;
-        color: #647d38;
-    }
-
-    .status {
-        font-family: monospace;
-        font-size: 8px;
-        color: #66808b;
-    }
-
-    .status-dot {
-        color: #118749;
-        font-size: 11px;
-    }
-
-    .resolved-dot {
-        color: #c85a13;
-    }
-
-    .card-title {
-        font-size: 13px;
+        padding: 4px 9px;
+        border-radius: 999px;
+        font-size: 0.72rem;
         font-weight: 700;
-        color: #142832;
+        margin-right: 5px;
         margin-bottom: 5px;
+        border: 1px solid #e5e7eb;
+        background: #f9fafb;
+        color: #374151;
     }
 
-    .card-description {
-        font-size: 10px;
-        line-height: 1.55;
-        color: #627a85;
-        min-height: 32px;
+    .badge-active {
+        background: #ecfdf3;
+        color: #067647;
+        border-color: #abefc6;
+    }
+
+    .badge-high {
+        background: #fff1f3;
+        color: #c01048;
+        border-color: #fda4af;
+    }
+
+    .badge-runbook {
+        background: #eff6ff;
+        color: #175cd3;
+        border-color: #bfdbfe;
+    }
+
+    .badge-incident {
+        background: #fff7ed;
+        color: #c2410c;
+        border-color: #fed7aa;
     }
 
     .tag {
         display: inline-block;
-        background: #e4edf0;
-        color: #617984;
-        border-radius: 8px;
-        padding: 2px 7px;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 0.72rem;
+        background: #f3f4f6;
+        color: #4b5563;
         margin-right: 4px;
-        font-family: monospace;
-        font-size: 7px;
+        margin-bottom: 4px;
     }
 
-    .card-divider {
-        border-top: 1px solid #d4e1e5;
-        margin: 10px 0 8px 0;
+    .muted {
+        color: #6b7280;
+        font-size: 0.86rem;
     }
 
-    .card-footer {
-        display: flex;
-        justify-content: space-between;
-        color: #78909a;
-        font-family: monospace;
-        font-size: 8px;
+    .doc-title {
+        font-size: 1.08rem;
+        font-weight: 700;
+        color: #111827;
+        margin: 4px 0 7px 0;
     }
 
-    .reading-pane {
-        background: rgba(255,255,255,0.52);
-        border: 1px solid #cbdfe7;
-        border-radius: 15px;
-        overflow: hidden;
+    .doc-description {
+        color: #4b5563;
+        font-size: 0.88rem;
+        line-height: 1.55;
     }
 
-    .reading-header {
-        padding: 12px 14px;
-        border-bottom: 1px solid #d3e1e5;
-        display: flex;
-        justify-content: space-between;
-        font-family: monospace;
-        font-size: 8px;
-        color: #66808b;
-        letter-spacing: 1px;
+    .section-label {
+        color: #6b7280;
+        font-size: 0.75rem;
+        font-weight: 700;
         text-transform: uppercase;
-    }
-
-    .reading-content {
-        padding: 15px;
+        letter-spacing: 0.08em;
+        margin-bottom: 5px;
     }
 
     .reading-title {
-        font-size: 14px;
+        font-size: 1.5rem;
         font-weight: 750;
-        color: #142832;
-        margin-bottom: 7px;
+        color: #111827;
+        margin: 4px 0 8px 0;
     }
 
     .reading-description {
-        color: #607984;
-        font-size: 10px;
-        line-height: 1.55;
-        margin-bottom: 12px;
-    }
-
-    .verification-box {
-        border: 1px solid #d5e2e6;
-        border-radius: 10px;
-        background: rgba(255,255,255,0.65);
-        padding: 11px;
-        margin-top: 10px;
-    }
-
-    .verification-title {
-        font-family: monospace;
-        color: #718a94;
-        font-size: 8px;
-        letter-spacing: 1px;
-        margin-bottom: 8px;
-    }
-
-    .verification-item {
-        font-size: 9px;
-        color: #536d78;
-        margin: 7px 0;
-        line-height: 1.4;
-    }
-
-    .verification-item::before {
-        content: "▪";
-        color: #18859a;
-        margin-right: 7px;
-    }
-
-    .command-box {
-        background: #0a202b;
-        border-radius: 11px;
-        padding: 14px;
-        color: #d8edf2;
-        font-family: monospace;
-        font-size: 10px;
-        line-height: 1.65;
-        white-space: pre-wrap;
-        overflow-x: auto;
-        margin-top: 10px;
-    }
-
-    .mode-card {
-        background: rgba(255,255,255,0.5);
-        border: 1px solid #cbdfe7;
-        border-radius: 16px;
-        padding: 12px;
-        margin-bottom: 18px;
-    }
-
-    .runbook-large {
-        background: rgba(255,255,255,0.72);
-        border: 1px solid #cbdfe7;
-        border-radius: 16px;
-        margin-bottom: 16px;
-        overflow: hidden;
-    }
-
-    .large-header {
-        padding: 12px 16px;
-        border-bottom: 1px solid #d7e3e7;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }
-
-    .number-circle {
-        display: inline-flex;
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        background: #0b8249;
-        color: white;
-        align-items: center;
-        justify-content: center;
-        font-family: monospace;
-        font-size: 8px;
-        margin-right: 8px;
-    }
-
-    .number-circle-high {
-        background: #d05b18;
-    }
-
-    .large-title {
-        font-size: 12px;
-        font-weight: 750;
-        color: #10232d;
-    }
-
-    .impact {
-        font-family: monospace;
-        font-size: 8px;
-        color: #c75a18;
-    }
-
-    .impact-low {
-        color: #16804b;
-    }
-
-    .large-body {
-        display: grid;
-        grid-template-columns: 2.2fr 1fr;
-    }
-
-    .large-main {
-        padding: 15px 18px;
-        border-right: 1px solid #d7e3e7;
-    }
-
-    .large-verification {
-        padding: 15px 18px;
-    }
-
-    .large-description {
-        color: #486572;
-        font-size: 10px;
+        color: #4b5563;
         line-height: 1.6;
-        margin-bottom: 9px;
+        margin-bottom: 1rem;
     }
 
-    .mono-label {
-        font-family: monospace;
-        color: #718a94;
-        font-size: 8px;
-        letter-spacing: 1px;
+    .meta-box {
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+    }
+
+    .meta-label {
+        color: #6b7280;
+        font-size: 0.72rem;
         text-transform: uppercase;
+        font-weight: 700;
+        letter-spacing: 0.05em;
     }
 
-    [data-testid="stSidebar"] {
-        background: #f4fafc;
+    .meta-value {
+        color: #111827;
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-top: 2px;
     }
 
-    [data-testid="stSidebar"] .block-container {
-        padding-top: 2rem;
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 14px;
+        border-color: #e5e7eb;
+        background: #ffffff;
     }
 
-    .stButton > button {
+    div[data-testid="stButton"] > button {
         border-radius: 9px;
-        border: 1px solid #c8dce3;
-        background: #f8fcfd;
-        color: #18313d;
-        font-size: 10px;
+        font-weight: 600;
     }
 
-    .stButton > button:hover {
-        border-color: #19869b;
-        color: #12758a;
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #6b7280;
     }
-
-    div[data-testid="stDownloadButton"] button {
-        border-radius: 9px;
-    }
-
-    @media (max-width: 900px) {
-        .large-body {
-            display: block;
-        }
-
-        .large-main {
-            border-right: none;
-            border-bottom: 1px solid #d7e3e7;
-        }
-    }
-
     </style>
     """,
     unsafe_allow_html=True,
@@ -504,435 +202,223 @@ st.markdown(
 # DATA
 # =========================================================
 
-def normalize_runbook(r):
-    r.setdefault("type", "runbook")
-    r.setdefault("status", "active")
-    r.setdefault("impact", "medium")
-    r.setdefault("author", "DevOps")
-    r.setdefault("tags", [])
-    r.setdefault("cause", "")
-    r.setdefault("solution", "")
+DATA_FILE = Path("war_room_binder.json")
 
-    if not isinstance(r["tags"], list):
-        r["tags"] = [str(r["tags"])]
-
-    r.setdefault(
-        "verification",
-        [
-            "Review the service status.",
-            "Confirm the remediation was successful.",
+DEFAULT_DATA = [
+    {
+        "id": "err-crashloop",
+        "title": "CrashLoopBackOff",
+        "category": "Kubernetes",
+        "type": "runbook",
+        "status": "active",
+        "priority": "high",
+        "author": "DevOps",
+        "tags": ["kubernetes", "pod"],
+        "description": "Pod repeatedly crashes after deployment.",
+        "cause": "Missing environment variables, database connection refused, or OOMKilled.",
+        "solution": """kubectl get pods -A
+kubectl describe pod <pod-name> -n <namespace>
+kubectl logs <pod-name> -n <namespace> --previous""",
+        "verification": [
+            "Pod status changes from CrashLoopBackOff to Running.",
+            "Application logs show successful startup.",
+            "Readiness and liveness probes become healthy.",
         ],
-    )
+    },
+    {
+        "id": "err-502",
+        "title": "502 Bad Gateway",
+        "category": "Ingress",
+        "type": "incident",
+        "status": "active",
+        "priority": "high",
+        "author": "DevOps",
+        "tags": ["ingress", "gateway"],
+        "description": "Gateway returns HTTP 502 when accessing the application.",
+        "cause": "Backend unreachable, incorrect service port, or failed readiness probe.",
+        "solution": """kubectl get pods -n <namespace>
+kubectl get svc -n <namespace>
+kubectl get endpoints -n <namespace>
+kubectl describe ingress <ingress-name> -n <namespace>""",
+        "verification": [
+            "Backend pods are Running and Ready.",
+            "Service endpoints contain healthy pod IPs.",
+            "Application responds successfully through the ingress.",
+        ],
+    },
+    {
+        "id": "err-db-conn",
+        "title": "Database Connection Exhausted",
+        "category": "Database",
+        "type": "runbook",
+        "status": "active",
+        "priority": "high",
+        "author": "DevOps",
+        "tags": ["database", "postgresql"],
+        "description": "Application cannot establish new database connections.",
+        "cause": "Connection leak, traffic spike, or insufficient connection pooling.",
+        "solution": """SELECT count(*) FROM pg_stat_activity;
 
-    return r
+SELECT state, count(*)
+FROM pg_stat_activity
+GROUP BY state;
 
-
-def save_data(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(
-            data,
-            f,
-            indent=2,
-            ensure_ascii=False,
-        )
-
-
-def load_data():
-    if not os.path.exists(DB_FILE):
-        data = [
-            normalize_runbook(x)
-            for x in DEFAULT_DATA
-        ]
-        save_data(data)
-        return data
-
-    try:
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        if not isinstance(data, list):
-            raise ValueError("Invalid database format")
-
-        return [
-            normalize_runbook(x)
-            for x in data
-        ]
-
-    except (
-        json.JSONDecodeError,
-        OSError,
-        ValueError,
-    ):
-        return [
-            normalize_runbook(x)
-            for x in DEFAULT_DATA
-        ]
-
-
-runbooks = load_data()
-
-
-# =========================================================
-# SESSION STATE
-# =========================================================
-
-if "selected_id" not in st.session_state:
-    st.session_state.selected_id = (
-        runbooks[0]["id"]
-        if runbooks
-        else None
-    )
-
-if "mode" not in st.session_state:
-    st.session_state.mode = "Knowledge Base"
-
-if "kb_filter" not in st.session_state:
-    st.session_state.kb_filter = "All"
-
-if "impact_filter" not in st.session_state:
-    st.session_state.impact_filter = "standard"
+SHOW max_connections;""",
+        "verification": [
+            "Active connections return to a normal range.",
+            "Application can establish new database connections.",
+            "Connection pool remains stable during normal traffic.",
+        ],
+    },
+]
 
 
 # =========================================================
 # HELPERS
 # =========================================================
 
-def get_type_class(runbook_type):
-    value = str(runbook_type).lower()
+def load_data():
+    if not DATA_FILE.exists():
+        return DEFAULT_DATA.copy()
 
-    if "incident" in value:
-        return "incident-badge"
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-    if "infra" in value:
-        return "infra-badge"
+        if not isinstance(data, list):
+            return DEFAULT_DATA.copy()
 
-    if "ci" in value:
-        return "cicd-badge"
+        return data
 
-    if "onboard" in value:
-        return "onboarding-badge"
-
-    return ""
+    except Exception:
+        return DEFAULT_DATA.copy()
 
 
-def get_type_label(runbook):
-    value = str(
-        runbook.get("type", "runbook")
-    ).lower()
+def save_data(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
-    mapping = {
-        "runbook": "RUNBOOK",
-        "incident": "INCIDENT",
-        "infra": "INFRA",
-        "ci/cd": "CI/CD",
-        "cicd": "CI/CD",
-        "onboarding": "ONBOARDING",
-    }
 
-    return mapping.get(
-        value,
-        value.upper(),
+def badge_class(value):
+    value = str(value).lower()
+
+    if value == "active":
+        return "badge-active"
+
+    if value == "high":
+        return "badge-high"
+
+    if value == "runbook":
+        return "badge-runbook"
+
+    if value == "incident":
+        return "badge-incident"
+
+    return "badge"
+
+
+def safe(value):
+    return html.escape(str(value))
+
+
+def export_pdf(document):
+    if not PDF_AVAILABLE:
+        return None
+
+    document_title = safe(document.get("title", "Document"))
+    description = safe(document.get("description", ""))
+    cause = safe(document.get("cause", ""))
+    solution = safe(document.get("solution", ""))
+
+    verification = document.get("verification", [])
+
+    verification_html = "".join(
+        f"<li>{safe(item)}</li>" for item in verification
     )
 
-
-def status_html(runbook):
-    status = str(
-        runbook.get("status", "active")
-    ).lower()
-
-    if status == "resolved":
-        return (
-            '<span class="status-dot resolved-dot">'
-            "●"
-            "</span> resolved"
-        )
-
-    return (
-        '<span class="status-dot">●</span> active'
-    )
-
-
-def tags_html(runbook):
-    tags = runbook.get("tags", [])
-
-    if not tags:
-        return ""
-
-    return "".join(
-        f'<span class="tag">'
-        f'{html.escape(str(tag))}'
-        f"</span>"
-        for tag in tags[:4]
-    )
-
-
-def card_html(runbook):
-    type_label = get_type_label(runbook)
-
-    type_class = get_type_class(
-        runbook.get("type", "runbook")
-    )
-
-    return f"""
-    <div class="runbook-card">
-
-        <div class="card-top">
-            <span class="type-badge {type_class}">
-                {html.escape(type_label)}
-            </span>
-
-            <span class="status">
-                {status_html(runbook)}
-            </span>
-        </div>
-
-        <div class="card-title">
-            {html.escape(
-                str(runbook.get("title", ""))
-            )}
-        </div>
-
-        <div class="card-description">
-            {html.escape(
-                str(runbook.get("cause", ""))
-            )}
-        </div>
-
-        <div style="margin-top: 8px;">
-            {tags_html(runbook)}
-        </div>
-
-        <div class="card-divider"></div>
-
-        <div class="card-footer">
-            <span>
-                {html.escape(
-                    str(
-                        runbook.get(
-                            "author",
-                            "DevOps"
-                        )
-                    )
-                )}
-            </span>
-
-            <span>
-                {html.escape(
-                    str(
-                        runbook.get(
-                            "id",
-                            ""
-                        )
-                    )
-                )}
-            </span>
-        </div>
-
-    </div>
-    """
-
-
-# =========================================================
-# PDF
-# =========================================================
-
-def generate_pdf(runbooks):
-    from xhtml2pdf import pisa
-
-    cards_html = ""
-
-    for r in runbooks:
-
-        cause = html.escape(
-            str(r.get("cause", ""))
-        )
-
-        solution = html.escape(
-            str(r.get("solution", ""))
-        )
-
-        cards_html += f"""
-        <div style="
-            background-color:#ffffff;
-            border:1px solid #d5e1e5;
-            padding:12px;
-            margin-bottom:12px;
-        ">
-
-            <div style="
-                font-size:11pt;
-                font-weight:bold;
-                color:#0f172a;
-                margin-bottom:5px;
-            ">
-                [{html.escape(
-                    get_type_label(r)
-                )}]
-                {html.escape(
-                    str(r.get("id", ""))
-                )}
-                -
-                {html.escape(
-                    str(r.get("title", ""))
-                )}
-            </div>
-
-            <div style="margin-bottom:7px;">
-                <strong>Root Cause:</strong>
-                {cause}
-            </div>
-
-            <div style="
-                background-color:#0f2029;
-                color:#f8fafc;
-                padding:10px;
-                font-family:monospace;
-                white-space:pre-wrap;
-            ">
-                {solution}
-            </div>
-
-        </div>
-        """
-
-    html_content = f"""
-    <!DOCTYPE html>
+    pdf_html = f"""
     <html>
-
     <head>
         <meta charset="UTF-8">
-
         <style>
-
-            @page {{
-                size: A4;
-                margin: 12mm;
-            }}
-
             body {{
                 font-family: Helvetica, Arial, sans-serif;
-                font-size: 9pt;
-                color: #1e293b;
+                font-size: 10pt;
+                color: #222;
             }}
 
             h1 {{
-                color: #0f172a;
-                border-bottom: 2px solid #cbd5e1;
-                padding-bottom: 6px;
-                font-size: 16pt;
+                font-size: 20pt;
+                margin-bottom: 8px;
             }}
 
-            .meta {{
-                color: #64748b;
-                font-size: 8pt;
-                margin-bottom: 16px;
+            h2 {{
+                font-size: 13pt;
+                margin-top: 20px;
             }}
 
+            p {{
+                line-height: 1.5;
+            }}
+
+            pre {{
+                background: #f2f2f2;
+                border: 1px solid #ddd;
+                padding: 12px;
+                font-size: 8.5pt;
+                white-space: pre-wrap;
+            }}
+
+            li {{
+                margin-bottom: 6px;
+            }}
         </style>
     </head>
 
     <body>
+        <h1>{document_title}</h1>
 
-        <h1>
-            DevOps Operations Manual
-        </h1>
+        <p>{description}</p>
 
-        <div class="meta">
-            Internal Infrastructure &
-            Incident Resolution Guides
-        </div>
+        <h2>Cause</h2>
+        <p>{cause}</p>
 
-        {cards_html}
+        <h2>Solution</h2>
+        <pre>{solution}</pre>
 
+        <h2>Verification</h2>
+        <ul>
+            {verification_html}
+        </ul>
     </body>
     </html>
     """
 
-    output = BytesIO()
+    output = io.BytesIO()
 
     result = pisa.CreatePDF(
-        html_content,
+        src=pdf_html,
         dest=output,
     )
 
     if result.err:
-        raise RuntimeError(
-            "PDF generation gagal."
-        )
+        return None
 
     return output.getvalue()
 
 
 # =========================================================
-# HEADER
+# SESSION STATE
 # =========================================================
 
-st.markdown(
-    """
-    <div class="top-header">
+if "documents" not in st.session_state:
+    st.session_state.documents = load_data()
 
-        <div class="brand-wrapper">
+if "selected_id" not in st.session_state:
+    st.session_state.selected_id = None
 
-            <div class="brand-icon">
-                OPS
-            </div>
-
-            <div>
-
-                <div class="brand-small">
-                    Documentation Archive
-                </div>
-
-                <div class="brand-name">
-                    War Room Binder
-                </div>
-
-            </div>
-
-        </div>
-
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
-# MODE SWITCH
-# =========================================================
-
-mode_col1, mode_col2, mode_spacer = st.columns(
-    [1, 1, 4]
-)
-
-with mode_col1:
-
-    if st.button(
-        "Knowledge Base",
-        use_container_width=True,
-    ):
-        st.session_state.mode = (
-            "Knowledge Base"
-        )
-        st.rerun()
-
-
-with mode_col2:
-
-    if st.button(
-        "Runbook Mode",
-        use_container_width=True,
-    ):
-        st.session_state.mode = (
-            "Runbook Mode"
-        )
-        st.rerun()
-
-
-st.markdown(
-    "<br>",
-    unsafe_allow_html=True,
-)
+if "mode" not in st.session_state:
+    st.session_state.mode = "Knowledge Base"
 
 
 # =========================================================
@@ -941,500 +427,465 @@ st.markdown(
 
 with st.sidebar:
 
-    st.markdown("### Operations")
+    st.markdown("## 🛠️ War Room Binder")
+    st.caption("Arsip dokumentasi tim DevOps")
 
-    st.caption(
-        "Internal documentation and infrastructure runbooks."
+    st.divider()
+
+    mode = st.radio(
+        "Workspace",
+        ["Knowledge Base", "Runbook Mode"],
+        index=(
+            0
+            if st.session_state.mode == "Knowledge Base"
+            else 1
+        ),
     )
 
-    st.markdown("---")
+    st.session_state.mode = mode
 
-    st.markdown("### Add Runbook")
+    st.divider()
 
-    with st.form(
-        "add_runbook_form",
-        clear_on_submit=True,
-    ):
+    st.markdown("### Add Documentation")
 
-        new_id = st.text_input(
-            "ID",
-            placeholder="err-pod-oom",
-        )
+    with st.form("add_document_form", clear_on_submit=True):
 
         new_title = st.text_input(
             "Title",
-            placeholder="Pod OOMKilled Exception",
-        )
-
-        new_type = st.selectbox(
-            "Type",
-            [
-                "runbook",
-                "incident",
-                "infra",
-                "ci/cd",
-                "onboarding",
-            ],
+            placeholder="e.g. Redis Connection Error",
         )
 
         new_category = st.text_input(
             "Category",
-            placeholder="Kubernetes",
+            placeholder="Database",
         )
 
-        new_status = st.selectbox(
-            "Status",
-            [
-                "active",
-                "resolved",
-            ],
+        new_type = st.selectbox(
+            "Type",
+            ["runbook", "incident"],
         )
 
-        new_impact = st.selectbox(
-            "Impact",
-            [
-                "low",
-                "medium",
-                "high",
-            ],
+        new_priority = st.selectbox(
+            "Priority",
+            ["high", "medium", "low"],
         )
 
-        new_author = st.text_input(
-            "Author",
-            value="DevOps",
-        )
-
-        new_tags = st.text_input(
-            "Tags",
-            placeholder=(
-                "kubernetes, pod, production"
-            ),
+        new_description = st.text_area(
+            "Description",
+            placeholder="Short explanation...",
         )
 
         new_cause = st.text_area(
-            "Description / Root Cause"
+            "Cause",
+            placeholder="Possible root causes...",
         )
 
         new_solution = st.text_area(
-            "Commands / Solution"
+            "Solution / Commands",
+            placeholder="kubectl ...",
+            height=140,
         )
 
         new_verification = st.text_area(
-            "Verification Steps",
-            placeholder=(
-                "Check pod status\n"
-                "Review logs\n"
-                "Verify service health"
-            ),
+            "Verification",
+            placeholder="One verification step per line",
         )
 
-        submit_btn = st.form_submit_button(
-            "Save Entry",
+        submitted = st.form_submit_button(
+            "Add Document",
             use_container_width=True,
         )
 
-        if submit_btn:
+        if submitted:
 
-            if (
-                not new_id.strip()
-                or not new_title.strip()
-                or not new_category.strip()
-            ):
-
-                st.error(
-                    "ID, Title, dan Category wajib diisi."
-                )
-
-            elif any(
-                item.get("id")
-                == new_id.strip()
-                for item in runbooks
-            ):
-
-                st.error(
-                    "ID tersebut sudah digunakan."
-                )
+            if not new_title.strip():
+                st.error("Title wajib diisi.")
 
             else:
-
-                verification = [
-                    x.strip()
-                    for x in new_verification.splitlines()
-                    if x.strip()
-                ]
-
-                tags = [
-                    x.strip()
-                    for x in new_tags.split(",")
-                    if x.strip()
-                ]
-
-                new_entry = {
-                    "id": new_id.strip(),
-                    "title": new_title.strip(),
-                    "category": new_category.strip(),
-                    "type": new_type,
-                    "status": new_status,
-                    "impact": new_impact,
-                    "author": (
-                        new_author.strip()
-                        or "DevOps"
+                new_doc = {
+                    "id": (
+                        new_title.lower()
+                        .strip()
+                        .replace(" ", "-")
+                        .replace("/", "-")
                     ),
-                    "tags": tags,
+                    "title": new_title.strip(),
+                    "category": new_category.strip() or "General",
+                    "type": new_type,
+                    "status": "active",
+                    "priority": new_priority,
+                    "author": "DevOps",
+                    "tags": [],
+                    "description": new_description.strip(),
                     "cause": new_cause.strip(),
                     "solution": new_solution.strip(),
-                    "verification": verification,
+                    "verification": [
+                        item.strip()
+                        for item in new_verification.splitlines()
+                        if item.strip()
+                    ],
                 }
 
-                runbooks.append(new_entry)
+                st.session_state.documents.append(new_doc)
+                save_data(st.session_state.documents)
 
-                save_data(runbooks)
-
-                st.session_state.selected_id = (
-                    new_entry["id"]
-                )
-
-                st.success(
-                    "Runbook saved."
-                )
-
+                st.success("Dokumentasi berhasil ditambahkan.")
                 st.rerun()
 
-    st.markdown("---")
+    st.divider()
 
-    st.markdown("### Export")
-
-    if st.button(
-        "Generate PDF Report",
-        use_container_width=True,
-    ):
-
-        try:
-
-            pdf_bytes = generate_pdf(
-                runbooks
-            )
-
-            st.download_button(
-                "Download PDF",
-                data=pdf_bytes,
-                file_name="devops_runbooks.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-            )
-
-        except ImportError:
-
-            st.error(
-                "xhtml2pdf belum terinstall. "
-                "Jalankan: pip install xhtml2pdf"
-            )
-
-        except Exception as exc:
-
-            st.error(
-                f"PDF generation gagal: {exc}"
-            )
+    st.caption(
+        f"{len(st.session_state.documents)} dokumentasi tersimpan"
+    )
 
 
 # =========================================================
-# KNOWLEDGE BASE MODE
+# HEADER
+# =========================================================
+
+st.markdown(
+    '<div class="hero-title">War Room Binder</div>',
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    '<div class="hero-subtitle">Arsip dokumentasi dan operational knowledge tim DevOps</div>',
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# KNOWLEDGE BASE
 # =========================================================
 
 if st.session_state.mode == "Knowledge Base":
 
+    top_left, top_right = st.columns([3, 1])
+
+    with top_left:
+        search = st.text_input(
+            "Search documentation",
+            placeholder="Search title, category, description, tag...",
+            label_visibility="collapsed",
+        )
+
+    with top_right:
+        filter_type = st.selectbox(
+            "Filter",
+            ["All", "Runbook", "Incident"],
+            label_visibility="collapsed",
+        )
+
+    documents = st.session_state.documents
+
+    filtered = []
+
+    for document in documents:
+
+        query = search.lower().strip()
+
+        searchable = " ".join(
+            [
+                str(document.get("title", "")),
+                str(document.get("category", "")),
+                str(document.get("description", "")),
+                str(document.get("cause", "")),
+                " ".join(document.get("tags", [])),
+            ]
+        ).lower()
+
+        matches_search = not query or query in searchable
+
+        matches_type = (
+            filter_type == "All"
+            or document.get("type", "").lower()
+            == filter_type.lower()
+        )
+
+        if matches_search and matches_type:
+            filtered.append(document)
+
     st.markdown(
-        '<div class="page-title">'
-        "Knowledge Base"
-        "</div>",
+        f'<div class="muted">{len(filtered)} documentation ditemukan</div>',
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        '<div class="page-subtitle">'
-        "Semua runbook, incident, infra, CI/CD, "
-        "dan onboarding dalam satu binder."
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    st.write("")
 
-    st.markdown(
-        f'<div class="doc-count">'
-        f"{len(runbooks)} docs"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    if not filtered:
 
-    st.markdown(
-        '<div class="search-panel">',
-        unsafe_allow_html=True,
-    )
+        st.markdown(
+            """
+            <div class="empty-state">
+                <h3>Documentation tidak ditemukan</h3>
+                <p>Coba ubah keyword atau filter.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    search_query = st.text_input(
-        "Search",
-        placeholder=(
-            "⌕  Search runbooks, incidents, "
-            "infra guides..."
-        ),
-        label_visibility="collapsed",
-    )
+    else:
 
-    st.markdown(
-        "</div>",
-        unsafe_allow_html=True,
-    )
+        for index, document in enumerate(filtered):
 
-    filter_col1, filter_col2, filter_col3, \
-    filter_col4, filter_col5, filter_col6 = st.columns(
-        [1, 1, 1, 1, 1, 1]
-    )
+            with st.container(border=True):
 
-    filters = [
-        ("All", filter_col1),
-        ("runbook", filter_col2),
-        ("incident", filter_col3),
-        ("infra", filter_col4),
-        ("ci/cd", filter_col5),
-        ("onboarding", filter_col6),
-    ]
-
-    for filter_name, column in filters:
-
-        with column:
-
-            label = (
-                filter_name.upper()
-                if filter_name != "All"
-                else "ALL"
-            )
-
-            if st.button(
-                label,
-                use_container_width=True,
-                key=f"filter_{filter_name}",
-            ):
-
-                st.session_state.kb_filter = (
-                    filter_name
+                col_content, col_action = st.columns(
+                    [5, 1],
+                    vertical_alignment="center",
                 )
 
-                st.rerun()
+                with col_content:
 
-    query = search_query.lower().strip()
+                    type_value = document.get("type", "runbook")
+                    status_value = document.get("status", "active")
+                    priority_value = document.get("priority", "medium")
 
-    active_filter = (
-        st.session_state.kb_filter.lower()
-    )
+                    st.markdown(
+                        f"""
+                        <span class="badge {badge_class(type_value)}">
+                            {safe(type_value.upper())}
+                        </span>
+                        <span class="badge {badge_class(status_value)}">
+                            {safe(status_value.upper())}
+                        </span>
+                        <span class="badge {badge_class(priority_value)}">
+                            {safe(priority_value.upper())}
+                        </span>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
-    filtered_runbooks = []
+                    st.markdown(
+                        f'<div class="doc-title">{safe(document.get("title", ""))}</div>',
+                        unsafe_allow_html=True,
+                    )
 
-    for r in runbooks:
+                    st.markdown(
+                        f'<div class="doc-description">{safe(document.get("description", ""))}</div>',
+                        unsafe_allow_html=True,
+                    )
 
-        matches_search = (
-            not query
-            or query in str(
-                r.get("id", "")
-            ).lower()
-            or query in str(
-                r.get("title", "")
-            ).lower()
-            or query in str(
-                r.get("cause", "")
-            ).lower()
-            or query in str(
-                r.get("category", "")
-            ).lower()
-            or any(
-                query in str(tag).lower()
-                for tag in r.get("tags", [])
-            )
-        )
+                    st.write("")
 
-        matches_filter = (
-            active_filter == "all"
-            or str(
-                r.get("type", "runbook")
-            ).lower()
-            == active_filter
-        )
+                    tags = document.get("tags", [])
 
-        if matches_search and matches_filter:
-            filtered_runbooks.append(r)
+                    if tags:
+
+                        tags_html = "".join(
+                            f'<span class="tag">#{safe(tag)}</span>'
+                            for tag in tags
+                        )
+
+                        st.markdown(
+                            tags_html,
+                            unsafe_allow_html=True,
+                        )
+
+                    st.caption(
+                        f'{document.get("author", "DevOps")}  ·  {document.get("id", "")}'
+                    )
+
+                with col_action:
+
+                    if st.button(
+                        "Open",
+                        key=f"open_{document.get('id')}_{index}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.selected_id = document.get("id")
+                        st.rerun()
+
+
+    # =====================================================
+    # READING PANE
+    # =====================================================
 
     selected = None
 
-    if filtered_runbooks:
+    if st.session_state.selected_id:
 
-        selected = next(
-            (
-                r
-                for r in filtered_runbooks
-                if r.get("id")
-                == st.session_state.selected_id
-            ),
-            None,
-        )
+        for document in st.session_state.documents:
 
-        if selected is None:
+            if document.get("id") == st.session_state.selected_id:
+                selected = document
+                break
 
-            selected = filtered_runbooks[0]
+    if selected:
 
-            st.session_state.selected_id = (
-                selected.get("id")
+        st.divider()
+
+        with st.container(border=True):
+
+            head_left, head_right = st.columns(
+                [5, 1],
+                vertical_alignment="center",
             )
 
-    left_col, right_col = st.columns(
-        [2.2, 1],
-        gap="medium",
-    )
-
-    with left_col:
-
-        if not filtered_runbooks:
-
-            st.info(
-                "No documentation matches "
-                "the current filter."
-            )
-
-        else:
-
-            for idx, runbook in enumerate(
-                filtered_runbooks
-            ):
+            with head_left:
 
                 st.markdown(
-                    card_html(runbook),
+                    f'<div class="section-label">{safe(selected.get("category", "General"))}</div>',
                     unsafe_allow_html=True,
                 )
 
+                st.markdown(
+                    f'<div class="reading-title">{safe(selected.get("title", ""))}</div>',
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    f'<div class="reading-description">{safe(selected.get("description", ""))}</div>',
+                    unsafe_allow_html=True,
+                )
+
+            with head_right:
+
+                pdf_data = export_pdf(selected)
+
+                if pdf_data:
+
+                    st.download_button(
+                        "Export PDF",
+                        data=pdf_data,
+                        file_name=(
+                            selected.get("id", "document")
+                            + ".pdf"
+                        ),
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+
+                else:
+
+                    st.caption(
+                        "PDF export unavailable"
+                    )
+
+            st.divider()
+
+            meta1, meta2, meta3, meta4 = st.columns(4)
+
+            with meta1:
+                st.markdown(
+                    f"""
+                    <div class="meta-box">
+                        <div class="meta-label">Type</div>
+                        <div class="meta-value">
+                            {safe(selected.get("type", ""))}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with meta2:
+                st.markdown(
+                    f"""
+                    <div class="meta-box">
+                        <div class="meta-label">Priority</div>
+                        <div class="meta-value">
+                            {safe(selected.get("priority", ""))}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with meta3:
+                st.markdown(
+                    f"""
+                    <div class="meta-box">
+                        <div class="meta-label">Status</div>
+                        <div class="meta-value">
+                            {safe(selected.get("status", ""))}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with meta4:
+                st.markdown(
+                    f"""
+                    <div class="meta-box">
+                        <div class="meta-label">Owner</div>
+                        <div class="meta-value">
+                            {safe(selected.get("author", ""))}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            st.write("")
+
+            st.markdown("### Cause")
+
+            st.write(
+                selected.get(
+                    "cause",
+                    "No cause documented.",
+                )
+            )
+
+            st.markdown("### Solution")
+
+            solution = selected.get("solution", "")
+
+            st.code(
+                solution,
+                language="bash",
+            )
+
+            st.markdown("### Verification")
+
+            verification = selected.get(
+                "verification",
+                [],
+            )
+
+            for step in verification:
+                st.checkbox(
+                    step,
+                    key=f"verify_{selected.get('id')}_{hash(step)}",
+                )
+
+            st.write("")
+
+            close_col, delete_col = st.columns(2)
+
+            with close_col:
+
                 if st.button(
-                    "Open document",
-                    key=(
-                        f"open_kb_"
-                        f"{runbook.get('id')}_"
-                        f"{idx}"
-                    ),
+                    "Close Document",
+                    key=f"close_{selected.get('id')}",
+                    use_container_width=True,
+                ):
+                    st.session_state.selected_id = None
+                    st.rerun()
+
+            with delete_col:
+
+                if st.button(
+                    "Delete Document",
+                    key=f"delete_{selected.get('id')}",
                     use_container_width=True,
                 ):
 
-                    st.session_state.selected_id = (
-                        runbook.get("id")
+                    st.session_state.documents = [
+                        doc
+                        for doc in st.session_state.documents
+                        if doc.get("id")
+                        != selected.get("id")
+                    ]
+
+                    save_data(
+                        st.session_state.documents
                     )
 
+                    st.session_state.selected_id = None
                     st.rerun()
-
-    with right_col:
-
-        if selected:
-
-            verification_html = "".join(
-                f"""
-                <div class="verification-item">
-                    {html.escape(str(step))}
-                </div>
-                """
-                for step in selected.get(
-                    "verification",
-                    [],
-                )
-            )
-
-            st.markdown(
-                f"""
-                <div class="reading-pane">
-
-                    <div class="reading-header">
-
-                        <span>
-                            Reading Pane
-                        </span>
-
-                        <span>
-                            {html.escape(
-                                get_type_label(selected)
-                            )}
-                        </span>
-
-                    </div>
-
-                    <div class="reading-content">
-
-                        <div class="reading-title">
-                            {html.escape(
-                                str(
-                                    selected.get(
-                                        "title",
-                                        ""
-                                    )
-                                )
-                            )}
-                        </div>
-
-                        <div class="reading-description">
-
-                            <strong>ID:</strong>
-                            {html.escape(
-                                str(
-                                    selected.get(
-                                        "id",
-                                        ""
-                                    )
-                                )
-                            )}
-
-                            <br><br>
-
-                            {html.escape(
-                                str(
-                                    selected.get(
-                                        "cause",
-                                        ""
-                                    )
-                                )
-                            )}
-
-                        </div>
-
-                        <div>
-                            {tags_html(selected)}
-                        </div>
-
-                        <div class="verification-box">
-
-                            <div class="verification-title">
-                                VERIFICATION STEPS
-                            </div>
-
-                            {verification_html}
-
-                        </div>
-
-                    </div>
-
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            if st.button(
-                "Open Full Document",
-                key=(
-                    f"full_"
-                    f"{selected.get('id')}"
-                ),
-                use_container_width=True,
-            ):
-
-                st.session_state.mode = (
-                    "Runbook Mode"
-                )
-
-                st.session_state.selected_id = (
-                    selected.get("id")
-                )
-
-                st.rerun()
 
 
 # =========================================================
@@ -1443,309 +894,160 @@ if st.session_state.mode == "Knowledge Base":
 
 else:
 
-    st.markdown(
-        '<div class="page-title">'
-        "Active Runbooks"
-        "</div>",
-        unsafe_allow_html=True,
+    st.markdown("## ⚡ Runbook Mode")
+
+    st.caption(
+        "Operational commands dan verification checklist untuk troubleshooting."
     )
 
-    st.markdown(
-        '<div class="page-subtitle">'
-        "Verified procedures with direct command "
-        "execution blocks."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<div class="mode-card">',
-        unsafe_allow_html=True,
-    )
-
-    command_query = st.text_input(
-        "Command Search",
-        placeholder=(
-            "⌕  Filter commands by service, "
-            "action, or environment..."
-        ),
+    search_runbook = st.text_input(
+        "Search runbook",
+        placeholder="Search runbook...",
         label_visibility="collapsed",
     )
 
-    st.markdown(
-        "</div>",
-        unsafe_allow_html=True,
+    runbook_priority = st.radio(
+        "Priority",
+        ["All", "High", "Medium", "Low"],
+        horizontal=True,
     )
 
-    mode_col1, mode_col2, mode_col3 = st.columns(
-        [1, 1, 4]
-    )
+    runbooks = [
+        document
+        for document in st.session_state.documents
+        if document.get("type") == "runbook"
+    ]
 
-    with mode_col1:
+    if search_runbook:
 
-        if st.button(
-            "Standard",
-            use_container_width=True,
-        ):
+        query = search_runbook.lower()
 
-            st.session_state.impact_filter = (
-                "standard"
-            )
-
-            st.rerun()
-
-    with mode_col2:
-
-        if st.button(
-            "Critical Only",
-            use_container_width=True,
-        ):
-
-            st.session_state.impact_filter = (
-                "critical"
-            )
-
-            st.rerun()
-
-    query = command_query.lower().strip()
-
-    runbook_results = []
-
-    for r in runbooks:
-
-        if (
-            str(
-                r.get(
-                    "type",
-                    "runbook"
-                )
+        runbooks = [
+            document
+            for document in runbooks
+            if query in (
+                document.get("title", "")
+                + " "
+                + document.get("description", "")
+                + " "
+                + document.get("category", "")
             ).lower()
-            != "runbook"
-        ):
-            continue
+        ]
 
-        search_text = " ".join(
-            [
-                str(r.get("id", "")),
-                str(r.get("title", "")),
-                str(r.get("cause", "")),
-                str(r.get("solution", "")),
-                str(r.get("category", "")),
-                " ".join(
-                    str(x)
-                    for x in r.get(
-                        "tags",
-                        []
-                    )
-                ),
-            ]
-        ).lower()
+    if runbook_priority != "All":
 
-        matches_query = (
-            not query
-            or query in search_text
-        )
+        runbooks = [
+            document
+            for document in runbooks
+            if document.get("priority", "").lower()
+            == runbook_priority.lower()
+        ]
 
-        matches_impact = (
-            st.session_state.impact_filter
-            == "standard"
-            or str(
-                r.get(
-                    "impact",
-                    "medium"
-                )
-            ).lower()
-            == "high"
-        )
+    st.write("")
 
-        if matches_query and matches_impact:
-            runbook_results.append(r)
+    if not runbooks:
 
-    if not runbook_results:
-
-        st.info(
-            "No active runbooks match "
-            "the current filter."
-        )
+        st.info("Belum ada runbook yang sesuai.")
 
     else:
 
-        for idx, r in enumerate(
-            runbook_results,
-            start=1,
-        ):
+        for index, runbook in enumerate(runbooks):
 
-            impact = str(
-                r.get(
-                    "impact",
-                    "medium"
+            with st.container(border=True):
+
+                left, right = st.columns(
+                    [5, 1],
+                    vertical_alignment="center",
                 )
-            ).lower()
 
-            circle_class = (
-                "number-circle-high"
-                if impact == "high"
-                else ""
-            )
+                with left:
 
-            impact_class = (
-                ""
-                if impact == "high"
-                else "impact-low"
-            )
+                    st.markdown(
+                        f"""
+                        <span class="badge badge-runbook">
+                            RUNBOOK
+                        </span>
 
-            verification_html = "".join(
-                f"""
-                <div class="verification-item">
-                    {html.escape(str(step))}
-                </div>
-                """
-                for step in r.get(
-                    "verification",
-                    []
-                )
-            )
+                        <span class="badge {badge_class(runbook.get("priority", "medium"))}">
+                            {safe(runbook.get("priority", "medium").upper())}
+                        </span>
 
-            st.markdown(
-                f"""
-                <div class="runbook-large">
-
-                    <div class="large-header">
-
-                        <div>
-
-                            <span class="number-circle {circle_class}">
-                                {idx:02d}
-                            </span>
-
-                            <span class="large-title">
-                                {html.escape(
-                                    str(
-                                        r.get(
-                                            "title",
-                                            ""
-                                        )
-                                    )
-                                )}
-                            </span>
-
+                        <div class="doc-title">
+                            {safe(runbook.get("title", ""))}
                         </div>
 
-                        <div>
-
-                            <span class="impact {impact_class}">
-                                impact:
-                                {html.escape(impact)}
-                            </span>
-
+                        <div class="doc-description">
+                            {safe(runbook.get("description", ""))}
                         </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
-                    </div>
+                with right:
 
-                    <div class="large-body">
-
-                        <div class="large-main">
-
-                            <div class="large-description">
-                                {html.escape(
-                                    str(
-                                        r.get(
-                                            "cause",
-                                            ""
-                                        )
-                                    )
-                                )}
-                            </div>
-
-                            <div class="mono-label">
-                                Remediation Commands
-                            </div>
-
-                            <div class="command-box">
-{html.escape(
-    str(
-        r.get(
-            "solution",
-            ""
-        )
-    )
-)}
-                            </div>
-
-                        </div>
-
-                        <div class="large-verification">
-
-                            <div class="mono-label">
-                                Verification Steps
-                            </div>
-
-                            <div style="margin-top: 8px;">
-                                {verification_html}
-                            </div>
-
-                        </div>
-
-                    </div>
-
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            action_col1, action_col2, action_col3 = (
-                st.columns([4, 1, 1])
-            )
-
-            with action_col3:
-
-                if st.button(
-                    "Delete",
-                    key=(
-                        f"delete_"
-                        f"{r.get('id')}_"
-                        f"{idx}"
-                    ),
-                ):
-
-                    runbooks = [
-                        item
-                        for item in runbooks
-                        if item.get("id")
-                        != r.get("id")
-                    ]
-
-                    save_data(runbooks)
-
-                    if (
-                        st.session_state.selected_id
-                        == r.get("id")
+                    if st.button(
+                        "Delete",
+                        key=f"runbook_delete_{runbook.get('id')}_{index}",
+                        use_container_width=True,
                     ):
-                        st.session_state.selected_id = (
-                            runbooks[0]["id"]
-                            if runbooks
-                            else None
+
+                        st.session_state.documents = [
+                            doc
+                            for doc in st.session_state.documents
+                            if doc.get("id")
+                            != runbook.get("id")
+                        ]
+
+                        save_data(
+                            st.session_state.documents
                         )
 
-                    st.rerun()
+                        st.rerun()
 
+                st.divider()
 
-# =========================================================
-# FOOTER
-# =========================================================
+                st.markdown("**Cause**")
 
-st.markdown(
-    """
-    <div style="
-        text-align:center;
-        margin-top:35px;
-        color:#78909a;
-        font-family:monospace;
-        font-size:8px;
-        letter-spacing:1px;
-    ">
-        WAR ROOM BINDER · DEVOPS DOCUMENTATION ARCHIVE
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+                st.write(
+                    runbook.get(
+                        "cause",
+                        "No cause documented.",
+                    )
+                )
+
+                st.markdown("**Commands / Solution**")
+
+                language = "sql" if (
+                    "SELECT" in runbook.get(
+                        "solution",
+                        "",
+                    ).upper()
+                ) else "bash"
+
+                st.code(
+                    runbook.get(
+                        "solution",
+                        "",
+                    ),
+                    language=language,
+                )
+
+                st.markdown("**Verification**")
+
+                verification = runbook.get(
+                    "verification",
+                    [],
+                )
+
+                for step_index, step in enumerate(
+                    verification
+                ):
+
+                    st.checkbox(
+                        step,
+                        key=(
+                            f"runbook_verify_"
+                            f"{runbook.get('id')}_"
+                            f"{step_index}"
+                        ),
+                    )
