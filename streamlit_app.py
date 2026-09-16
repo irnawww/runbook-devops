@@ -10,39 +10,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
-# =========================
-# Authentication
-# =========================
-
-def login():
-    st.title("DevOps Knowledge Base")
-    st.caption("Internal Infrastructure & Incident Resolution Guides")
-    st.markdown("---")
-
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if (
-            username == st.secrets["auth"]["username"]
-            and password == st.secrets["auth"]["password"]
-        ):
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else:
-            st.error("Username atau password salah.")
-
-
-if not st.session_state.get("authenticated", False):
-    login()
-    st.stop()
-
-
-# =========================
-# Application
-# =========================
-
 DB_FILE = "runbooks_db.json"
 
 DEFAULT_DATA = [
@@ -193,7 +160,7 @@ default_categories = [
     "Ingress",
     "CI/CD",
     "Monitoring",
-    "Cloud",
+    "Cloud"
 ]
 
 all_categories = sorted(
